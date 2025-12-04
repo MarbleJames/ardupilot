@@ -203,6 +203,8 @@ private:
     AP_Float                    _land_ofs_cm_x;         // Desired landing position of the camera forward of the target in vehicle body frame
     AP_Float                    _land_ofs_cm_y;         // Desired landing position of the camera right of the target in vehicle body frame
     AP_Float                    _accel_noise;           // accelerometer process noise
+    AP_Float                    _xy_pos_nse_base;       // xy position noise minimum
+    AP_Float                    _xy_pos_nse_growth;     // xy position noise growth (per m of altitude)
     AP_Vector3f                 _cam_offset_m;          // Position of the camera relative to the CG
     AP_Float                    _xy_max_dist_desc_m;    // Vehicle doing prec land will only descent vertically when horizontal error (in m) is below this limit
     AP_Int8                     _strict;                // PrecLand strictness
