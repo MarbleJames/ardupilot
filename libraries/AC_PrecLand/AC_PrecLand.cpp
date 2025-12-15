@@ -87,22 +87,6 @@ const AP_Param::GroupInfo AC_PrecLand::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("ACC_P_NSE", 6, AC_PrecLand, _accel_noise, 2.5f),
 
-    // @Param: XY_NSE_BASE
-    // @DisplayName: Kalman Filter Base XY Noise
-    // @Description: Kalman Filter Minimum lateral position noise. Sets the lowest allowed XY noise at low altitude
-    // @Units: m
-    // @Range: 0.0001 2.5
-    // @User: Advanced
-    AP_GROUPINFO("XY_NSE_BASE", 6, AC_PrecLand, _xy_pos_nse_base, 0.02f),
-
-    // @Param: XY_NSE_GROWTH
-    // @DisplayName: Kalman Filter XY Noise Growth
-    // @Description: Kalman Filter XY Position Noise gradient, XY Noise increases linearly with z height above target
-    // @Units: m/m
-    // @Range: 0 - 0.05
-    // @User: Advanced
-    AP_GROUPINFO("XY_NSE_GROWTH", 6, AC_PrecLand, _xy_pos_nse_growth, 0.01f),
-
     // @Param: CAM_POS_X
     // @DisplayName: Camera X position offset
     // @Description: X position of the camera in body frame. Positive X is forward of the origin.
@@ -207,6 +191,22 @@ const AP_Param::GroupInfo AC_PrecLand::var_info[] = {
     // @User: Advanced
     // @RebootRequired: True
     AP_GROUPINFO_FRAME("ORIENT", 18, AC_PrecLand, _orient, AC_PRECLAND_ORIENT_DEFAULT, AP_PARAM_FRAME_ROVER), 
+
+    // @Param: XY_NSE_BASE
+    // @DisplayName: Kalman Filter Base XY Noise
+    // @Description: Kalman Filter Minimum lateral position noise. Sets the lowest allowed XY noise at low altitude
+    // @Units: m
+    // @Range: 0.0001 2.5
+    // @User: Advanced
+    AP_GROUPINFO("XY_NSE_BASE", 19, AC_PrecLand, _xy_pos_nse_base, 0.02f),
+
+    // @Param: XY_NSE_GROWTH
+    // @DisplayName: Kalman Filter XY Noise Growth
+    // @Description: Kalman Filter XY Position Noise gradient, XY Noise increases linearly with z height above target
+    // @Units: m/m
+    // @Range: 0 - 0.05
+    // @User: Advanced
+    AP_GROUPINFO("XY_NSE_GROWTH", 20, AC_PrecLand, _xy_pos_nse_growth, 0.01f),
 
     AP_GROUPEND
 };
