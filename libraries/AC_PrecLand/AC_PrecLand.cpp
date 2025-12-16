@@ -198,7 +198,7 @@ const AP_Param::GroupInfo AC_PrecLand::var_info[] = {
     // @Units: m
     // @Range: 0.0001 2.5
     // @User: Advanced
-    AP_GROUPINFO("XY_NSE_BASE", 19, AC_PrecLand, _xy_pos_nse_base, 0.02f),
+    AP_GROUPINFO("XY_NSE_BASE", 19, AC_PrecLand, _xy_pos_nse_base, 0.01f),
 
     // @Param: XY_NSE_GROWTH
     // @DisplayName: Kalman Filter XY Noise Growth
@@ -206,7 +206,7 @@ const AP_Param::GroupInfo AC_PrecLand::var_info[] = {
     // @Units: m/m
     // @Range: 0 - 0.05
     // @User: Advanced
-    AP_GROUPINFO("XY_NSE_GROWTH", 20, AC_PrecLand, _xy_pos_nse_growth, 0.01f),
+    AP_GROUPINFO("XY_NSE_GRAD", 20, AC_PrecLand, _xy_pos_nse_grad, 0.02f),
 
     AP_GROUPEND
 };
@@ -571,7 +571,7 @@ void AC_PrecLand::run_estimator(float rangefinder_alt_m, bool rangefinder_alt_va
 
             // Update if a new Line-Of-Sight measurement is available
             if (construct_pos_meas_using_rangefinder(rangefinder_alt_m, rangefinder_alt_valid)) {
-                float xy_pos_var = sq(_target_pos_rel_meas_ned_m.z*(_xy_pos_nse_growth * + 0.01f*AP::ahrs().get_gyro().length() + _xy_pos_nse_base));
+                float xy_pos_var = sq(_target_pos_rel_meas_ned_m.z*(_xy_pos_nse_grad + 0.01f*AP::ahrs().get_gyro().length()) + _xy_pos_nse_base);
                 if (!_estimator_initialized) {
                     // Inform the user landing target has been found
                     GCS_SEND_TEXT(MAV_SEVERITY_INFO, "PrecLand: Target Found");
