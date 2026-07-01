@@ -180,7 +180,7 @@ const AP_Param::GroupInfo AC_PrecLand::var_info[] = {
     // @Param: OPTIONS
     // @DisplayName: Precision Landing Extra Options
     // @Description: Precision Landing Extra Options
-    // @Bitmask: 0: Moving Landing Target, 1: Allow Precision Landing after manual reposition, 2: Maintain high speed in final descent
+    // @Bitmask: 0: Moving Landing Target, 1: Allow Precision Landing after manual reposition, 2: Maintain high speed in final descent, 3: Align yaw to landing target orientation
     // @User: Advanced
     AP_GROUPINFO("OPTIONS", 17, AC_PrecLand, _options, 0),
 
@@ -650,6 +650,19 @@ bool AC_PrecLand::retrieve_los_meas(Vector3f& target_vec_unit, VectorFrame& fram
             target_vec_unit.rotate_xy(cd_to_rad(_yaw_align_cd));
         }
 
+        // extract yaw from landing target quaternion if yaw alignment is enabled
+        if (yaw_align_enabled()) {
+            const Quaternion q = _backend->get_los_quat();
+            if (!q.is_zero()) {
+                // extract yaw component from the quaternion
+                float roll_rad, pitch_rad, yaw_rad;
+                q.to_euler(roll_rad, pitch_rad, yaw_rad);
+                _target_yaw_rad = yaw_rad;
+                _target_yaw_valid = true;
+
+            }
+        }
+
         // rotate vector based on sensor orientation to get correct body frame vector
         if (_orient != ROTATION_PITCH_270) {
             // by default, the vector is constructed downwards in body frame
@@ -789,6 +802,17 @@ void AC_PrecLand::run_output_prediction()
 
     // record the last time there was a target output
     _last_valid_target_ms = AP_HAL::millis();
+}
+
+// returns the target yaw (rad) extracted from the landing target quaternion
+// returns true if a valid target yaw is available
+bool AC_PrecLand::get_target_yaw_rad(float &yaw_rad) const
+{
+    if (!_target_yaw_valid || !_target_acquired) {
+        return false;
+    }
+    yaw_rad = _target_yaw_rad;
+    return true;
 }
 
 /*

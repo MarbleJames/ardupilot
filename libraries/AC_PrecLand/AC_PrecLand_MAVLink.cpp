@@ -33,6 +33,7 @@ void AC_PrecLand_MAVLink::handle_msg(const mavlink_landing_target_t &packet, uin
     if (packet.position_valid == 1) {
         if (packet.distance > 0) {
             _los_meas.vec_unit = Vector3f{packet.x, packet.y, packet.z};
+            _los_meas.q = Quaternion(packet.q[0], packet.q[1], packet.q[2], packet.q[3]);
             _los_meas.vec_unit /= packet.distance;
             _los_meas.frame = (packet.frame == MAV_FRAME_BODY_FRD) ? AC_PrecLand::VectorFrame::BODY_FRD : AC_PrecLand::VectorFrame::LOCAL_FRD;
         } else {
