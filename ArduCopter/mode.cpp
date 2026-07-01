@@ -839,6 +839,15 @@ void Mode::land_run_horizontal_control()
         Vector2f accel_ne_zero;
         // target vel will remain zero if landing target is stationary
         pos_control->input_pos_vel_accel_NE_m(target_pos_ne_m, target_vel_ne_ms, accel_ne_zero);
+
+        // align vehicle yaw with landing target orientation if option enabled
+        float target_yaw_rad;
+        if (copter.precland.yaw_align_enabled() && copter.precland.get_target_yaw_rad(target_yaw_rad)) {
+            // Convert relative yaw error to absolute NED heading to use the
+            // self-correcting absolute path in set_fixed_yaw_rad (see mode_loiter.cpp).
+            const float abs_target_yaw = wrap_PI(copter.ahrs.get_yaw_rad() + target_yaw_rad);
+            auto_yaw.set_fixed_yaw_rad(abs_target_yaw, 0.0f, 0, false);
+        }
     }
 #endif
 

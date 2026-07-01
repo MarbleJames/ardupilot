@@ -84,6 +84,7 @@ void Mode::AutoYaw::set_mode(Mode yaw_mode)
     case Mode::FIXED:
         // keep heading pointing in the direction held in fixed_yaw
         // caller should set the fixed_yaw
+        _last_update_ms = millis();
         break;
 
     case Mode::LOOK_AHEAD:
@@ -114,7 +115,6 @@ void Mode::AutoYaw::set_mode(Mode yaw_mode)
 // set_fixed_yaw_rad - sets the yaw look at heading for auto mode
 void Mode::AutoYaw::set_fixed_yaw_rad(float yaw_rad, float yaw_rate_rads, int8_t direction, bool relative_angle)
 {
-    _last_update_ms = millis();
     const float angle_rad = yaw_rad;
 
     // calculate final angle as relative to vehicle heading or absolute

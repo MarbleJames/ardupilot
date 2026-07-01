@@ -44,7 +44,15 @@ bool ModeLoiter::do_precision_loiter()
         return false;        // don't move on the ground
     }
     // if the pilot *really* wants to move the vehicle, let them....
-    if (loiter_nav->get_pilot_desired_acceleration_NE_mss().length() > 0.5) {
+    // Check raw lean angle rather than get_pilot_desired_acceleration_NE_mss() which
+    // includes the coordinated-turn centripetal acceleration. When yaw alignment is
+    // active, the coordinated turn adds centripetal acceleration proportional to
+    // (desired_velocity * yaw_rate) which can exceed the 0.5 m/s² threshold even with
+    // sticks centred, falsely disabling precision loiter and causing spiral divergence.
+    float target_roll_rad, target_pitch_rad;
+    get_pilot_desired_lean_angles_rad(target_roll_rad, target_pitch_rad, loiter_nav->get_angle_max_rad(), attitude_control->get_althold_lean_angle_max_rad());
+    // radians(3.0f) is equivalent to 0.5 m/s² (g * sin(3 deg) ≈ 0.51 m/s²)
+    if (Vector2f(target_roll_rad, target_pitch_rad).length() > radians(3.0f)) {
         return false;
     }
     if (!copter.precland.target_acquired()) {
@@ -67,6 +75,16 @@ void ModeLoiter::precision_loiter_xy()
     Vector2f zero;
     // target vel will remain zero if landing target is stationary
     pos_control->input_pos_vel_accel_NE_m(target_pos_ne_m, target_vel_ne_ms, zero);
+
+    // align vehicle yaw with landing target orientation if option enabled
+    float target_yaw_rad;
+    if (copter.precland.yaw_align_enabled() && copter.precland.get_target_yaw_rad(target_yaw_rad)) {
+        // need to convert relative yaw error to absolute NED heading to remain compatible with yaw slew behaviour.
+        // without, the slew behaviour will cause the vehicle to overshoot the target yaw and oscillate around it.
+        const float abs_target_yaw = wrap_PI(copter.ahrs.get_yaw_rad() + target_yaw_rad);
+        auto_yaw.set_fixed_yaw_rad(abs_target_yaw, 0.0f, 0, false);
+    }
+
     // run pos controller
     pos_control->NE_update_controller();
 }
@@ -175,7 +193,16 @@ void ModeLoiter::run()
     }
 
     // call attitude controller
+#if AC_PRECLAND_ENABLED
+    if (_precision_loiter_active && copter.precland.yaw_align_enabled()) {
+        // use heading command from auto_yaw for smooth yaw alignment to target
+        attitude_control->input_thrust_vector_heading(loiter_nav->get_thrust_vector(), auto_yaw.get_heading());
+    } else {
+        attitude_control->input_thrust_vector_rate_heading_rads(loiter_nav->get_thrust_vector(), target_yaw_rate_rads, false);
+    }
+#else
     attitude_control->input_thrust_vector_rate_heading_rads(loiter_nav->get_thrust_vector(), target_yaw_rate_rads, false);
+#endif
     // run the vertical position controller and set output throttle
     pos_control->D_update_controller();
 }
