@@ -1291,7 +1291,7 @@ LOG_STRUCTURE_FROM_AIS \
     { LOG_SPOL_MSG, sizeof(log_SPOL), \
       "SPOL", "QBB",  "TimeUS,Spl,SplDes", "s--", "F--" , true }
     { LOG_DEBUG_FLOAT_ARRAY_MSG, sizeof(log_DEBUG_FLOAT_ARRAY), \
-      "DEBUG", "QHZZZNNN", "TimeUS,ArrayID,DataA64,DataB64,DataC64,DataD16,DataE16,DataF16", "s-------", "F-------", true }
+      "DBGF", "QHZZZNNN", "TimeUS,ArrayID,DataA64,DataB64,DataC64,DataD16,DataE16,DataF16", "s-------", "F-------", true }
 
 // message types 0 to 31 reserved for vehicle-specific use
 
