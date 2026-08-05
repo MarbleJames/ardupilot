@@ -654,12 +654,16 @@ bool AC_PrecLand::retrieve_los_meas(Vector3f& target_vec_unit, VectorFrame& fram
         if (yaw_align_enabled()) {
             const Quaternion q = _backend->get_los_quat();
             if (!q.is_zero()) {
-                // extract yaw component from the quaternion
+                // extract yaw component from the quaternion and convert to
+                // absolute NED yaw now, using the current vehicle heading.
+                // Storing relative yaw and converting in the control loop would
+                // cause the absolute target to move with the vehicle between
+                // measurements (stale_rel + changing_vehicle_yaw), producing
+                // yaw oscillation proportional to measurement latency.
                 float roll_rad, pitch_rad, yaw_rad;
                 q.to_euler(roll_rad, pitch_rad, yaw_rad);
-                _target_yaw_rad = yaw_rad;
+                _target_yaw_rad = wrap_PI(AP::ahrs().get_yaw_rad() + yaw_rad);
                 _target_yaw_valid = true;
-
             }
         }
 

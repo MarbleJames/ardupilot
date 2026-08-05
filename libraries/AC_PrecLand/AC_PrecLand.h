@@ -118,7 +118,8 @@ public:
     bool do_fast_descend() const { return _options & PLND_OPTION_FAST_DESCEND; }
     bool yaw_align_enabled() const { return _options & PLND_OPTION_YAW_ALIGN; }
 
-    // returns the target yaw (rad) extracted from the landing target quaternion
+    // returns the absolute NED target yaw (rad) derived from the landing target quaternion,
+    // computed at the time the measurement was received.
     // returns true if a valid target yaw is available
     bool get_target_yaw_rad(float &yaw_rad) const;
 
