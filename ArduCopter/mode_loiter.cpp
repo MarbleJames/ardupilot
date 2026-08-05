@@ -79,10 +79,9 @@ void ModeLoiter::precision_loiter_xy()
     // align vehicle yaw with landing target orientation if option enabled
     float target_yaw_rad;
     if (copter.precland.yaw_align_enabled() && copter.precland.get_target_yaw_rad(target_yaw_rad)) {
-        // need to convert relative yaw error to absolute NED heading to remain compatible with yaw slew behaviour.
-        // without, the slew behaviour will cause the vehicle to overshoot the target yaw and oscillate around it.
-        const float abs_target_yaw = wrap_PI(copter.ahrs.get_yaw_rad() + target_yaw_rad);
-        auto_yaw.set_fixed_yaw_rad(abs_target_yaw, 0.0f, 0, false);
+        // target_yaw_rad is already an absolute NED heading (converted at
+        // measurement time in AC_PrecLand::retrieve_los_meas). Use directly.
+        auto_yaw.set_fixed_yaw_rad(target_yaw_rad, 0.0f, 0, false);
     }
 
     // run pos controller
