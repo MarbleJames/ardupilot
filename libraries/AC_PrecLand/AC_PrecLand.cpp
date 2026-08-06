@@ -664,7 +664,7 @@ bool AC_PrecLand::retrieve_los_meas(Vector3f& target_vec_unit, VectorFrame& fram
                 q.to_euler(roll_rad, pitch_rad, yaw_rad);
                 float delayed_roll_rad, delayed_pitch_rad, delayed_yaw_rad;
                 (*_inertial_history)[0]->Tbn.to_euler(&delayed_roll_rad, &delayed_pitch_rad, &delayed_yaw_rad);
-                _target_yaw_rad = wrap_PI(AP::ahrs().get_yaw_rad() + yaw_rad);
+                _target_yaw_rad = wrap_PI(delayed_yaw_rad + yaw_rad);
                 _target_yaw_valid = true;
             }
         }
