@@ -1289,7 +1289,7 @@ LOG_STRUCTURE_FROM_AIS \
     { LOG_MOTBATT_MSG, sizeof(log_MotBatt), \
       "MOTB", "QfffffB",  "TimeUS,LiftMax,BatVolt,ThLimit,ThrAvMx,ThrOut,FailFlags", "s------", "F------" , true }, \
     { LOG_SPOL_MSG, sizeof(log_SPOL), \
-      "SPOL", "QBB",  "TimeUS,Spl,SplDes", "s--", "F--" , true }
+      "SPOL", "QBB",  "TimeUS,Spl,SplDes", "s--", "F--" , true }, \
     { LOG_DEBUG_FLOAT_ARRAY_MSG, sizeof(log_DEBUG_FLOAT_ARRAY), \
       "DBGF", "QHZZZNNN", "TimeUS,ArrayID,DataA64,DataB64,DataC64,DataD16,DataE16,DataF16", "s-------", "F-------", true }
 
