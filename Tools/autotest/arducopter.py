@@ -7027,6 +7027,129 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
         if ex is not None:
             raise ex
 
+    def PrecisionLandingTimedDescent(self):
+        """Cross the precision-landing pin in wind and score touchdown at height zero."""
+        self.context_push()
+        ex = None
+        try:
+            # Bit 4 only. Bit 5 (miss abort) stays off so wind lean does not climb away.
+            self.set_parameters({
+                "PLND_ENABLED": 1,
+                "PLND_TYPE": 4,
+                "PLND_OPTIONS": 16,
+            })
+            self.set_analog_rangefinder_parameters()
+            self.set_parameter("SIM_SONAR_SCALE", 12)
+            self.set_parameters({
+                "SIM_PLD_ENABLE": 1,
+                "SIM_PLD_HEIGHT": 0,
+                "SIM_PLD_ALT_LMT": 15,
+                "SIM_PLD_DIST_LMT": 30,
+                "SIM_PLD_OPTIONS": 1,  # slant range, the ARC measurement
+                "SIM_WIND_SPD": 3,
+                "SIM_WIND_DIR": 90,
+                "SIM_WIND_TURB": 0.5,
+                "SIM_WIND_T": 1,  # wind still present near the ground
+            })
+            self.reboot_sitl()
+            self.wait_ready_to_arm()
+
+            start = self.get_location()
+            # Keep the pin off the home point so the crossing is unambiguous.
+            target_lat, target_lng = mavextra.gps_offset(start.lat, start.lng, 15, 0)
+            target = Location.latlon_only(target_lat, target_lng)
+            self.progress("Setting target to %f %f" % (target.lat, target.lng))
+            self.set_parameters({
+                "SIM_PLD_LAT": target.lat,
+                "SIM_PLD_LON": target.lng,
+            })
+
+            self.takeoff(8, mode="GUIDED")
+            east_lat, east_lng = mavextra.gps_offset(target.lat, target.lng, 0, 12)
+            east = Location(east_lat, east_lng, 8, AltFrame.ABOVE_HOME)
+            self.fly_guided_move_to(east, timeout=60)
+
+            # Fly west across the pin and engage LAND while still moving.
+            west_lat, west_lng = mavextra.gps_offset(target.lat, target.lng, 0, -12)
+            self.send_set_position_target_global_int(
+                int(west_lat * 1.0e7), int(west_lng * 1.0e7), 8)
+            tstart = self.get_sim_time()
+            engaged_speed = None
+            while True:
+                if self.get_sim_time_cached() - tstart > 60:
+                    raise NotAchievedException("Did not reach the pin with horizontal speed")
+                m = self.assert_receive_message('GLOBAL_POSITION_INT')
+                here = Location.latlon_only(m.lat * 1.0e-7, m.lon * 1.0e-7)
+                dist = self.get_distance(here, target)
+                groundspeed = math.hypot(m.vx, m.vy) * 0.01
+                self.progress("crossing dist=%.1f m groundspeed=%.1f m/s" % (dist, groundspeed))
+                if dist < 8 and groundspeed > 1.5:
+                    engaged_speed = groundspeed
+                    break
+            self.progress("Engaging LAND at %.1f m/s" % engaged_speed)
+            self.change_mode("LAND")
+            self.zero_throttle()
+
+            # Score the lowest relative-alt sample, not the position after disarm.
+            best_alt = None
+            best_lat = None
+            best_lon = None
+            tstart = self.get_sim_time()
+            disarmed = False
+            while not disarmed:
+                if self.get_sim_time_cached() - tstart > 180:
+                    raise NotAchievedException("Timed descent did not disarm")
+                m = self.mav.recv_match(
+                    type=['GLOBAL_POSITION_INT', 'HEARTBEAT'],
+                    blocking=True,
+                    timeout=10)
+                if m is None:
+                    raise NotAchievedException("No position or heartbeat during descent")
+                if m.get_type() == 'GLOBAL_POSITION_INT':
+                    alt = m.relative_alt * 0.001
+                    if best_alt is None or alt < best_alt:
+                        best_alt = alt
+                        best_lat = m.lat
+                        best_lon = m.lon
+                elif (m.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED) == 0:
+                    disarmed = True
+            if best_alt is None:
+                raise NotAchievedException("No GLOBAL_POSITION_INT during descent")
+            if best_alt > 0.3:
+                raise NotAchievedException(
+                    "Touchdown sample still %.2f m up; landing detection hid the height" % best_alt)
+
+            touchdown = Location.latlon_only(best_lat * 1.0e-7, best_lon * 1.0e-7)
+            delta = self.get_distance(target, touchdown)
+            self.progress("Touchdown %.2f m from pin at relative alt %.2f m" % (delta, best_alt))
+            max_delta = 1.5
+            if delta > max_delta:
+                raise NotAchievedException(
+                    "Did not land close enough to target position (%fm > %fm)" % (delta, max_delta))
+
+            dfreader = self.dfreader_for_current_onboard_log()
+            saw_pl = False
+            saw_fields = False
+            while True:
+                pl = dfreader.recv_match(type='PL')
+                if pl is None:
+                    break
+                saw_pl = True
+                if pl.pX != 0 or pl.pY != 0 or pl.vX != 0 or pl.vY != 0 or pl.mZ != 0:
+                    saw_fields = True
+                    break
+            if not saw_pl:
+                raise NotAchievedException("Did not see PL log message")
+            if not saw_fields:
+                raise NotAchievedException("PL pX pY vX vY mZ were all zero")
+        except Exception as e:  # noqa: BLE001
+            self.print_exception_caught(e)
+            ex = e
+        self.context_pop()
+        self.reboot_sitl()
+        if ex is not None:
+            raise ex
+
     def Landing(self):
         """Test landing the aircraft."""
 
@@ -19766,6 +19889,7 @@ class AutoTestCopter(vehicle_test_suite.TestSuite):
             self.NavDelayAbsTime,
             self.Landing,
             self.PrecisionLanding,
+            self.PrecisionLandingTimedDescent,
             self.AutoTune,
             self.AutoTuneYawD,
             self.ThrowMode,
