@@ -37,6 +37,9 @@ public:
         return true;
     };
 
+    // return the quaternion from the last valid LOS measurement
+    Quaternion get_los_quat() const { return _los_meas.q; };
+
     // returns system time in milliseconds of last los measurement
     uint32_t los_meas_time_ms() const { return _los_meas.time_ms; };
 
@@ -55,6 +58,7 @@ protected:
 
     struct {
         Vector3f vec_unit;  // unit vector pointing towards target in earth or body frame (see frame)
+        Quaternion q;       // quaternion from target to sensor, only used for some backends
         AC_PrecLand::VectorFrame frame;  // frame of vector pointing towards target
         uint32_t time_ms;   // system time in milliseconds when the vector was measured
         bool valid;         // true if there is a valid measurement from the sensor

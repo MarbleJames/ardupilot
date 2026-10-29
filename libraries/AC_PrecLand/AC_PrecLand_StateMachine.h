@@ -46,7 +46,14 @@ public:
     // This method deals with all of these scenarios
     // Returns the action needed to be done by the vehicle.
     // Parameters: Vector3p "retry_pos_m" is filled with the required location if we need to retry landing.
-    Status update(Vector3p &retry_pos_m);
+    // landed is true once the land detector has called the vehicle landed; abort checks stop.
+    Status update(Vector3p &retry_pos_m, bool landed);
+
+    // True while the beside-pad landing is descending. Callers must not steer back onto the pin.
+    bool precland_suppressed() const { return _precland_suppressed; }
+
+    // Horizontal position to hold during the beside-pad descent. False until that descent has started.
+    bool get_beside_target_NE_m(Vector2p &pos_ne_m) const;
 
     // This is only called when the current status of the state machine returns "failsafe" and will return the action that the vehicle should do
     // At the moment this method only allows you to stop in air permanently, or land vertically
@@ -81,6 +88,35 @@ private:
     // Reset the landing statemachine. This needs to be called every time the landing target is back in sight.
     // So that if the landing target goes out of sight again, we can start the failed landing procedure back from the beginning stage
     void reset_failed_landing_statemachine();
+
+    // Missed-pin abort: climb straight up, then translate, then descend. Retries share PLND_RET_MAX.
+    enum class MissPhase : uint8_t {
+        NONE = 0,
+        CLIMB,
+        TRANSLATE,
+        DESCEND,
+    };
+
+    Status update_miss_retry(Vector3p &retry_pos_m);
+    Status update_beside(Vector3p &retry_pos_m);
+    // Start a climb-then-translate retry. False when PLND_RET_MAX is already used or position is unavailable.
+    bool begin_miss_retry(Vector3p &retry_pos_m);
+    Status begin_beside(Vector3p &retry_pos_m);
+    Status begin_abort(Vector3p &retry_pos_m);
+    void begin_lean_hold(Vector3p &retry_pos_m);
+    bool uncommanded_lean() const;
+    bool excessive_lean() const;
+    bool lean_abort_latched() const;
+    void update_lean_timer();
+
+    MissPhase _miss_phase;
+    MissPhase _beside_phase;
+    bool _lean_hold;
+    bool _precland_suppressed;
+    bool _lean_alerted;
+    Vector3p _climb_pos_ned_m;
+    Vector3p _hold_pos_ned_m;
+    uint32_t _lean_since_ms;
 
     // State machine for action to do when Landing target is lost (after it was in sight a while back)
     enum class TargetLostAction: uint8_t {

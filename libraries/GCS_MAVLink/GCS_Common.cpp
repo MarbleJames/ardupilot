@@ -4104,6 +4104,38 @@ void GCS_MAVLINK::handle_command_ack(const mavlink_message_t &msg)
 #endif  // AP_GENERATOR_LOWEHEISER_ENABLED
 }
 
+void GCS_MAVLINK::handle_debug_float_array(const mavlink_message_t &msg)
+{
+#if HAL_LOGGING_ENABLED
+    mavlink_debug_float_array_t packet;
+    mavlink_msg_debug_float_array_decode(&msg, &packet);
+    struct log_DEBUG_FLOAT_ARRAY pkt{
+        LOG_PACKET_HEADER_INIT(LOG_DEBUG_FLOAT_ARRAY_MSG),
+        time_us : AP_HAL::micros64(),
+        array_id : packet.array_id,
+        dataA64 : {0,},
+        dataB64 : {0,},
+        dataC64 : {0,},
+        dataD16 : {0,},
+        dataE16 : {0,},
+        dataF16 : {0,}
+    };
+    int bytes_per_data64 = sizeof(pkt.dataA64);
+    int bytes_per_data16 = sizeof(pkt.dataD16);
+    int floats_per_data64 = bytes_per_data64/sizeof(float);
+    int floats_per_data16 = bytes_per_data16/sizeof(float);
+    memcpy((void *)&pkt.dataA64[0], &packet.data[0 * floats_per_data64], bytes_per_data64);
+    memcpy((void *)&pkt.dataB64[0], &packet.data[1 * floats_per_data64], bytes_per_data64);
+    memcpy((void *)&pkt.dataC64[0], &packet.data[2 * floats_per_data64], bytes_per_data64);
+    memcpy((void *)&pkt.dataD16[0], &packet.data[3 * floats_per_data64], bytes_per_data16);
+    memcpy((void *)&pkt.dataE16[0], &packet.data[3 * floats_per_data64 + 1 * floats_per_data16], bytes_per_data16);
+    memcpy((void *)&pkt.dataF16[0], &packet.data[3 * floats_per_data64 + 2 * floats_per_data16], sizeof(packet.data) - 3 * bytes_per_data64 - 2 * bytes_per_data16);
+    AP::logger().WriteBlock(&pkt, sizeof(pkt));
+#else
+    (void)msg;
+#endif
+}
+
 #if AP_RC_CHANNEL_ENABLED
 // allow override of RC channel values for complete GCS
 // control of switch position and RC PWM values.
@@ -4296,6 +4328,11 @@ void GCS_MAVLINK::handle_message(const mavlink_message_t &msg)
 
     case MAVLINK_MSG_ID_COMMAND_ACK: {
         handle_command_ack(msg);
+        break;
+    }
+
+    case MAVLINK_MSG_ID_DEBUG_FLOAT_ARRAY: {
+        handle_debug_float_array(msg);
         break;
     }
 

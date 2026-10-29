@@ -386,6 +386,11 @@ void GCS_MAVLINK_Copter::handle_command_ack(const mavlink_message_t &msg)
     GCS_MAVLINK::handle_command_ack(msg);
 }
 
+void GCS_MAVLINK_Copter::handle_debug_float_array(const mavlink_message_t &msg)
+{
+    GCS_MAVLINK::handle_debug_float_array(msg);
+}
+
 /*
   handle a LANDING_TARGET command. The timestamp has been jitter corrected
 */

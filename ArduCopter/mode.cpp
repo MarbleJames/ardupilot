@@ -1,5 +1,24 @@
 #include "Copter.h"
 
+#if AC_PRECLAND_ENABLED
+#include <AC_PrecLand/AC_PrecLand_Capture.h>
+
+// True when yaw-align is on and heading is outside PLND_YAW_TOL.
+// A missing target yaw blocks the final drop. Yaw align off does not block.
+bool Mode::precland_yaw_blocks_final_drop() const
+{
+    if (!copter.precland.yaw_align_enabled()) {
+        return false;
+    }
+    float target_yaw_rad = 0.0f;
+    if (!copter.precland.get_target_yaw_rad(target_yaw_rad)) {
+        return true;
+    }
+    const float yaw_err_rad = wrap_PI(target_yaw_rad - ahrs.get_yaw_rad());
+    return fabsf(yaw_err_rad) > radians(copter.precland.get_yaw_tol_deg());
+}
+#endif
+
 /*
  * High level calls to set and update flight modes logic for individual
  * flight modes is in control_acro.cpp, control_stabilize.cpp, etc
@@ -740,7 +759,10 @@ void Mode::land_run_vertical_control(bool pause_descent)
 
 #if AC_PRECLAND_ENABLED
         const bool navigating = pos_control->NE_is_active();
-        bool doing_precision_landing = !copter.ap.land_repo_active && copter.precland.target_acquired() && navigating;
+        bool doing_precision_landing = !copter.ap.land_repo_active &&
+                                       !copter.precland_statemachine.precland_suppressed() &&
+                                       copter.precland.target_acquired() &&
+                                       navigating;
 
         if (doing_precision_landing) {
             // prec landing is active
@@ -755,7 +777,57 @@ void Mode::land_run_vertical_control(bool pause_descent)
             const float max_horiz_pos_error_m = copter.precland.get_max_xy_error_before_descending_m();
             Vector3f target_pos_meas_ned_m;
             copter.precland.get_target_position_measurement_NED_m(target_pos_meas_ned_m);
-            if (target_error_m > max_horiz_pos_error_m && !is_zero(max_horiz_pos_error_m)) {
+            if (target_pos_meas_ned_m.z > AC_PrecLand_Capture::FINAL_HEIGHT_M) {
+                copter.precland.clear_final_drop_freeze();
+            }
+            float frozen_climb_ms = 0.0f;
+            const bool climb_frozen = copter.precland.get_frozen_climb_rate_ms(frozen_climb_ms);
+            // Timed descent is only the last 0.35 m. The slowdown above that is unchanged.
+            const bool in_timed_band = copter.precland.do_timed_descent() &&
+                                       target_pos_meas_ned_m.z <= AC_PrecLand_Capture::FINAL_HEIGHT_M &&
+                                       (is_positive(target_pos_meas_ned_m.z) || climb_frozen);
+            if (in_timed_band) {
+                if (climb_frozen) {
+                    climb_rate_ms = frozen_climb_ms;
+                } else if (precland_yaw_blocks_final_drop()) {
+                    // Yaw during translation, but do not commit the drop until heading is inside tolerance.
+                    climb_rate_ms = 0.0f;
+                } else {
+                    Vector2f pos_to_target_m;
+                    Vector2f vel_target_rel_ms;
+                    bool have_rel = false;
+                    if (copter.precland.final_horizontal_frozen()) {
+                        Vector2p frozen_pos_ne_m;
+                        Vector2f frozen_vel_ne_ms;
+                        if (copter.precland.get_frozen_horizontal(frozen_pos_ne_m, frozen_vel_ne_ms)) {
+                            const Vector2p current_pos_ne_m = pos_control->get_pos_estimate_NED_m().xy();
+                            pos_to_target_m = (frozen_pos_ne_m - current_pos_ne_m).tofloat();
+                            vel_target_rel_ms = frozen_vel_ne_ms - pos_control->get_vel_estimate_NED_ms().xy();
+                            have_rel = true;
+                        }
+                    }
+                    if (!have_rel) {
+                        have_rel = copter.precland.get_target_position_relative_NE_m(pos_to_target_m) &&
+                                   copter.precland.get_target_velocity_relative_NE_ms(vel_target_rel_ms);
+                    }
+                    const float pos_p = pos_control->NE_get_pos_p().kP();
+                    const float accel_mss = pos_control->NE_get_max_accel_mss();
+                    const float vel_max_ms = pos_control->NE_get_max_speed_ms();
+                    float rate_down_ms = 0.0f;
+                    if (!have_rel ||
+                        !AC_PrecLand_Capture::descent_rate_down_ms(target_pos_meas_ned_m.z, pos_to_target_m, vel_target_rel_ms,
+                                                                   fabsf(land_speed_ms), pos_p, accel_mss, vel_max_ms, rate_down_ms)) {
+                        climb_rate_ms = 0.0f;
+                    } else {
+                        climb_rate_ms = -rate_down_ms;
+                    }
+                    // Latch only a real descent. A hold must be able to start moving once the capture time comes in.
+                    if (is_negative(climb_rate_ms) &&
+                        target_pos_meas_ned_m.z <= AC_PrecLand_Capture::FREEZE_HEIGHT_M) {
+                        copter.precland.set_frozen_climb_rate_ms(climb_rate_ms);
+                    }
+                }
+            } else if (target_error_m > max_horiz_pos_error_m && !is_zero(max_horiz_pos_error_m)) {
                 // doing precland but too far away from the obstacle
                 // do not descend
                 climb_rate_ms = 0.0f;
@@ -825,24 +897,68 @@ void Mode::land_run_horizontal_control()
     // this variable will be updated if prec land target is in sight and pilot isn't trying to reposition the vehicle
     copter.ap.prec_land_active = false;
 #if AC_PRECLAND_ENABLED
-    copter.ap.prec_land_active = !copter.ap.land_repo_active && copter.precland.target_acquired();
+    copter.ap.prec_land_active = !copter.ap.land_repo_active &&
+                                 !copter.precland_statemachine.precland_suppressed() &&
+                                 copter.precland.target_acquired();
+    Vector2p beside_pos_ne_m;
+    const bool beside_hold = !copter.ap.land_repo_active &&
+                              copter.precland_statemachine.get_beside_target_NE_m(beside_pos_ne_m);
     // run precision landing
     if (copter.ap.prec_land_active) {
         Vector2p target_pos_ne_m;
         Vector2f target_vel_ne_ms;
-        if (!copter.precland.get_target_position_m(target_pos_ne_m)) {
+        const bool have_target = copter.precland.get_target_position_m(target_pos_ne_m);
+        if (!have_target) {
             target_pos_ne_m = pos_control->get_pos_estimate_NED_m().xy();
         }
          // get the velocity of the target
         copter.precland.get_target_velocity_ms(pos_control->get_vel_estimate_NED_ms().xy(), target_vel_ne_ms);
 
+        if (!copter.precland.do_timed_descent()) {
+            copter.precland.clear_final_drop_freeze();
+        } else {
+            Vector3f target_pos_meas_ned_m;
+            copter.precland.get_target_position_measurement_NED_m(target_pos_meas_ned_m);
+            if (target_pos_meas_ned_m.z > AC_PrecLand_Capture::FINAL_HEIGHT_M) {
+                copter.precland.clear_final_drop_freeze();
+            } else if (copter.precland.final_horizontal_frozen()) {
+                Vector2f frozen_vel_ne_ms;
+                if (copter.precland.get_frozen_horizontal(target_pos_ne_m, frozen_vel_ne_ms)) {
+                    target_vel_ne_ms = frozen_vel_ne_ms;
+                }
+            } else if (have_target &&
+                       is_positive(target_pos_meas_ned_m.z) &&
+                       target_pos_meas_ned_m.z <= AC_PrecLand_Capture::FREEZE_HEIGHT_M &&
+                       !precland_yaw_blocks_final_drop()) {
+                // Freeze before the vertical controller runs, so the drop does not chase noise.
+                copter.precland.freeze_final_horizontal(target_pos_ne_m, target_vel_ne_ms);
+            }
+        }
+
         Vector2f accel_ne_zero;
         // target vel will remain zero if landing target is stationary
         pos_control->input_pos_vel_accel_NE_m(target_pos_ne_m, target_vel_ne_ms, accel_ne_zero);
+
+        // align vehicle yaw with landing target orientation if option enabled
+        float target_yaw_rad;
+        if (copter.precland.yaw_align_enabled() && copter.precland.get_target_yaw_rad(target_yaw_rad)) {
+            // target_yaw_rad is already an absolute NED heading (converted at
+            // measurement time in AC_PrecLand::retrieve_los_meas). Use directly.
+            auto_yaw.set_fixed_yaw_rad(target_yaw_rad, 0.0f, 0, false);
+        }
+    } else if (beside_hold) {
+        // Hold the offset. Do not steer back onto the pin.
+        Vector2f vel_ne_zero;
+        Vector2f accel_ne_zero;
+        pos_control->input_pos_vel_accel_NE_m(beside_pos_ne_m, vel_ne_zero, accel_ne_zero);
     }
 #endif
 
-    if (!copter.ap.prec_land_active) {
+    if (!copter.ap.prec_land_active
+#if AC_PRECLAND_ENABLED
+        && !beside_hold
+#endif
+       ) {
         Vector2f accel_ne_zero;
         pos_control->input_vel_accel_NE_m(vel_correction_ms, accel_ne_zero);
     }
@@ -929,7 +1045,7 @@ void Mode::precland_run()
         // This will get updated later to a retry pos if needed
         Vector3p retry_pos_ned_m;
 
-        switch (copter.precland_statemachine.update(retry_pos_ned_m)) {
+        switch (copter.precland_statemachine.update(retry_pos_ned_m, copter.ap.land_complete)) {
         case AC_PrecLand_StateMachine::Status::RETRYING:
             // we want to retry landing by going to another position
             precland_retry_position(retry_pos_ned_m);
