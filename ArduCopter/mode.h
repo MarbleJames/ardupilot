@@ -240,6 +240,10 @@ protected:
     void land_run_normal_or_precland(bool pause_descent = false);
 
 #if AC_PRECLAND_ENABLED
+    // True when yaw-align is on and heading is outside PLND_YAW_TOL.
+    // A missing target yaw blocks the final drop. Yaw align off does not block.
+    bool precland_yaw_blocks_final_drop() const;
+
     // Go towards a position commanded by prec land state machine in order to retry landing
     // The passed in location is expected to be NED and in meters
     void precland_retry_position(const Vector3p &retry_pos);
