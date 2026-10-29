@@ -29,6 +29,15 @@ static const uint32_t LANDING_TARGET_TIMEOUT_MS = 2000; // Sensor must update wi
 static const uint32_t LANDING_TARGET_LOST_TIMEOUT_MS = 180000; // Target will be considered as "lost" if the last known location of the target is more than this many ms ago
 static const float    LANDING_TARGET_LOST_DIST_THRESH_M  = 30; // If the last known location of the landing target is beyond this many meters, then we will consider it lost
 
+// Miss-abort thresholds. Operator tuning is the option bit, yaw tolerance and beside-pad offset.
+static constexpr float PRECLAND_MISS_WINDOW_M = 1.5f;          // last metres in which a miss aborts
+static constexpr float PRECLAND_BELOW_PAD_M = 0.12f;           // how far below the remembered pad top
+static constexpr float PRECLAND_BELOW_PAD_RF_CONFIRM_M = 0.05f; // rangefinder must also have increased
+static constexpr float PRECLAND_RF_JUMP_M = 0.12f;             // sudden range increase while near the pad
+static constexpr float PRECLAND_NEAR_PAD_M = 0.5f;             // "near the pad" for the range-jump check
+static constexpr float PRECLAND_PAD_REMEMBER_XY_M = 0.15f;     // only learn the pad top when this close horizontally
+static constexpr uint32_t PRECLAND_BELOW_PAD_HOLD_MS = 100;    // a couple of radar frames, not two loops
+
 const AP_Param::GroupInfo AC_PrecLand::var_info[] = {
     // @Param: ENABLED
     // @DisplayName: Precision Land enabled/disabled
@@ -180,7 +189,7 @@ const AP_Param::GroupInfo AC_PrecLand::var_info[] = {
     // @Param: OPTIONS
     // @DisplayName: Precision Landing Extra Options
     // @Description: Precision Landing Extra Options
-    // @Bitmask: 0: Moving Landing Target, 1: Allow Precision Landing after manual reposition, 2: Maintain high speed in final descent, 3: Align yaw to landing target orientation
+    // @Bitmask: 0: Moving Landing Target, 1: Allow Precision Landing after manual reposition, 2: Maintain high speed in final descent, 3: Align yaw to landing target orientation, 4: Time final descent to arrive over the target, 5: Abort a missed pin and land beside the pad
     // @User: Advanced
     AP_GROUPINFO("OPTIONS", 17, AC_PrecLand, _options, 0),
 
@@ -207,6 +216,30 @@ const AP_Param::GroupInfo AC_PrecLand::var_info[] = {
     // @Range: 0 - 0.05
     // @User: Advanced
     AP_GROUPINFO("XY_NSE_GRAD", 20, AC_PrecLand, _xy_pos_nse_grad, 0.01f),
+
+    // @Param: YAW_TOL
+    // @DisplayName: PrecLand final yaw tolerance
+    // @Description: Maximum yaw error allowed before the timed final descent is committed when PLND_OPTIONS bit 3 (align yaw) is set. The vehicle still yaws during translation. Yaw align disabled does not wait on this.
+    // @Units: deg
+    // @Range: 1 45
+    // @User: Advanced
+    AP_GROUPINFO("YAW_TOL", 21, AC_PrecLand, _yaw_tol_deg, 10),
+
+    // @Param: SAFE_BRG
+    // @DisplayName: PrecLand beside-pad bearing
+    // @Description: Bearing, clockwise from north, of the point used after a missed-pin abort exhausts PLND_RET_MAX. The vehicle lands this far from the last target and does not steer back onto the pin. This is not PLND_LAND_OFS_X or PLND_LAND_OFS_Y, which offset the camera from the target in the body frame.
+    // @Units: deg
+    // @Range: -180 180
+    // @User: Advanced
+    AP_GROUPINFO("SAFE_BRG", 22, AC_PrecLand, _safe_brg_deg, 0),
+
+    // @Param: SAFE_DIST
+    // @DisplayName: PrecLand beside-pad distance
+    // @Description: Horizontal distance from the last landing target for the beside-pad landing after a missed-pin abort exhausts PLND_RET_MAX. Combined with PLND_SAFE_BRG. This is not PLND_LAND_OFS_X or PLND_LAND_OFS_Y.
+    // @Units: m
+    // @Range: 0.5 10
+    // @User: Advanced
+    AP_GROUPINFO("SAFE_DIST", 23, AC_PrecLand, _safe_dist_m, 1.0f),
 
     AP_GROUPEND
 };
@@ -329,6 +362,13 @@ void AC_PrecLand::update(float rangefinder_alt_cm, bool rangefinder_alt_valid)
 
     // check the status of the landing target location
     check_target_status(rangefinder_alt_m, rangefinder_alt_valid);
+
+    if (do_miss_abort()) {
+        update_miss_sensors(rangefinder_alt_m, rangefinder_alt_valid);
+    } else if (_pad_valid || _below_pad_latched) {
+        // Option turned off: drop a latch that would otherwise abort on the next enable.
+        reset_miss_state();
+    }
 
 #if HAL_LOGGING_ENABLED
     const uint32_t now = AP_HAL::millis();
@@ -895,6 +935,139 @@ void AC_PrecLand::Write_Precland()
     AP::logger().WriteBlock(&pkt, sizeof(pkt));
 }
 #endif
+
+void AC_PrecLand::freeze_final_horizontal(const Vector2p &pos_ne_m, const Vector2f &vel_ne_ms)
+{
+    _frozen_pos_ne_m = pos_ne_m;
+    _frozen_vel_ne_ms = vel_ne_ms;
+    _final_horizontal_frozen = true;
+}
+
+bool AC_PrecLand::get_frozen_horizontal(Vector2p &pos_ne_m, Vector2f &vel_ne_ms) const
+{
+    if (!_final_horizontal_frozen) {
+        return false;
+    }
+    pos_ne_m = _frozen_pos_ne_m;
+    vel_ne_ms = _frozen_vel_ne_ms;
+    return true;
+}
+
+bool AC_PrecLand::get_frozen_climb_rate_ms(float &climb_rate_ms) const
+{
+    if (!_final_climb_frozen) {
+        return false;
+    }
+    climb_rate_ms = _frozen_climb_rate_ms;
+    return true;
+}
+
+void AC_PrecLand::set_frozen_climb_rate_ms(float climb_rate_ms)
+{
+    _frozen_climb_rate_ms = climb_rate_ms;
+    _final_climb_frozen = true;
+}
+
+void AC_PrecLand::clear_final_drop_freeze()
+{
+    _final_horizontal_frozen = false;
+    _final_climb_frozen = false;
+}
+
+void AC_PrecLand::reset_below_pad_timer()
+{
+    _below_pad_since_ms = 0;
+    _below_pad_latched = false;
+}
+
+void AC_PrecLand::reset_miss_state()
+{
+    reset_below_pad_timer();
+    _rf_valid = false;
+    _pad_valid = false;
+    _pad_min_rf_valid = false;
+}
+
+bool AC_PrecLand::in_miss_abort_window() const
+{
+    Vector3p pos_ned;
+    const bool have_pos = AP::ahrs().get_relative_position_NED_origin(pos_ned);
+    if (_pad_valid && _pad_min_rf_valid && _pad_min_rf_m <= PRECLAND_MISS_WINDOW_M) {
+        // Stay in the window after the rangefinder jumps from the pin to the ground.
+        // Climbing back above the window (the retry) closes it.
+        if (have_pos) {
+            const float height_above_pad_m = _pad_top_d_m - float(pos_ned.z);
+            if (height_above_pad_m > PRECLAND_MISS_WINDOW_M) {
+                return false;
+            }
+        }
+        return true;
+    }
+    return _rf_valid && _rf_alt_m <= PRECLAND_MISS_WINDOW_M;
+}
+
+void AC_PrecLand::update_miss_sensors(float rangefinder_alt_m, bool rangefinder_alt_valid)
+{
+    const bool rf_ok = rangefinder_alt_valid && is_positive(rangefinder_alt_m);
+    const float prev_rf_m = _rf_alt_m;
+    const bool had_rf = _rf_valid;
+    _rf_valid = rf_ok;
+    if (rf_ok) {
+        _rf_alt_m = rangefinder_alt_m;
+    }
+
+    Vector3p pos_ned;
+    if (!AP::ahrs().get_relative_position_NED_origin(pos_ned)) {
+        reset_below_pad_timer();
+        return;
+    }
+
+    // Learn the pad only when the horizontal estimate is on the pin and the
+    // rangefinder is in the abort window. The highest surface (smallest NED-down) wins.
+    if (_target_acquired &&
+        _target_pos_rel_out_ne_m.length() <= PRECLAND_PAD_REMEMBER_XY_M &&
+        rf_ok &&
+        rangefinder_alt_m <= PRECLAND_MISS_WINDOW_M) {
+        const float surface_d_m = float(pos_ned.z) + rangefinder_alt_m;
+        if (!_pad_valid || surface_d_m < _pad_top_d_m) {
+            _pad_top_d_m = surface_d_m;
+            _pad_valid = true;
+        }
+        if (!_pad_min_rf_valid || rangefinder_alt_m < _pad_min_rf_m) {
+            _pad_min_rf_m = rangefinder_alt_m;
+            _pad_min_rf_valid = true;
+        }
+    }
+
+    const float height_above_pad_m = _pad_valid ? (_pad_top_d_m - float(pos_ned.z)) : 0.0f;
+    bool below_pad = false;
+    // Both the inertial height and the rangefinder have to agree. Baro drift alone does not trip this.
+    if (_pad_valid && rf_ok && _pad_min_rf_valid &&
+        height_above_pad_m < -PRECLAND_BELOW_PAD_M &&
+        rangefinder_alt_m > _pad_min_rf_m + PRECLAND_BELOW_PAD_RF_CONFIRM_M) {
+        below_pad = true;
+    }
+    // A downward rangefinder that steps from the pin to the ground is the same miss.
+    if (!below_pad && had_rf && rf_ok && rangefinder_alt_m > prev_rf_m + PRECLAND_RF_JUMP_M) {
+        const bool near_pad = (_pad_valid && height_above_pad_m < PRECLAND_NEAR_PAD_M) ||
+                              (!_pad_valid && prev_rf_m < PRECLAND_NEAR_PAD_M);
+        if (near_pad) {
+            below_pad = true;
+        }
+    }
+
+    if (below_pad) {
+        const uint32_t now_ms = AP_HAL::millis();
+        if (_below_pad_since_ms == 0) {
+            _below_pad_since_ms = now_ms;
+        }
+        if (now_ms - _below_pad_since_ms >= PRECLAND_BELOW_PAD_HOLD_MS) {
+            _below_pad_latched = true;
+        }
+    } else {
+        reset_below_pad_timer();
+    }
+}
 
 // singleton instance
 AC_PrecLand *AC_PrecLand::_singleton;

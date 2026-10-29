@@ -117,6 +117,28 @@ public:
     bool allow_precland_after_reposition() const { return _options & PLND_OPTION_PRECLAND_AFTER_REPOSITION; }
     bool do_fast_descend() const { return _options & PLND_OPTION_FAST_DESCEND; }
     bool yaw_align_enabled() const { return _options & PLND_OPTION_YAW_ALIGN; }
+    bool do_timed_descent() const { return _options & PLND_OPTION_TIMED_DESCENT; }
+    bool do_miss_abort() const { return _options & PLND_OPTION_MISS_ABORT; }
+    float get_yaw_tol_deg() const { return MAX(float(_yaw_tol_deg), 1.0f); }
+    float get_safe_brg_deg() const { return constrain_float(_safe_brg_deg, -180.0f, 180.0f); }
+    float get_safe_dist_m() const { return constrain_float(_safe_dist_m, 0.5f, 10.0f); }
+    // True once a landing target position has been produced. Used by the beside-pad failsafe.
+    bool has_last_target() const { return _last_valid_target_ms != 0; }
+
+    // True in the last ~1.5 m, including after the rangefinder jumps from the pin to the ground.
+    bool in_miss_abort_window() const;
+    // True after the vehicle has been ~12 cm below the remembered pad top, confirmed by the rangefinder.
+    bool missed_below_pad() const { return _below_pad_latched; }
+    void reset_below_pad_timer();
+    void reset_miss_state();
+
+    // Final-drop freeze so the last few centimetres do not chase target noise.
+    bool final_horizontal_frozen() const { return _final_horizontal_frozen; }
+    void freeze_final_horizontal(const Vector2p &pos_ne_m, const Vector2f &vel_ne_ms);
+    bool get_frozen_horizontal(Vector2p &pos_ne_m, Vector2f &vel_ne_ms) const;
+    bool get_frozen_climb_rate_ms(float &climb_rate_ms) const;
+    void set_frozen_climb_rate_ms(float climb_rate_ms);
+    void clear_final_drop_freeze();
 
     // returns the absolute NED target yaw (rad) derived from the landing target quaternion,
     // computed at the time the measurement was received.
@@ -167,6 +189,8 @@ private:
         PLND_OPTION_PRECLAND_AFTER_REPOSITION = (1 << 1),
         PLND_OPTION_FAST_DESCEND = (1 << 2),
         PLND_OPTION_YAW_ALIGN = (1 << 3),
+        PLND_OPTION_TIMED_DESCENT = (1 << 4),
+        PLND_OPTION_MISS_ABORT = (1 << 5),
     };
 
     // frames for vectors from vehicle to target
@@ -177,6 +201,10 @@ private:
 
     // check the status of the target
     void check_target_status(float rangefinder_alt_m, bool rangefinder_alt_valid);
+
+    // Remember the pad top from the rangefinder while horizontal error is small.
+    // A baro change on its own cannot set the below-pad latch.
+    void update_miss_sensors(float rangefinder_alt_m, bool rangefinder_alt_valid);
 
     // Check if the landing target is supposed to be in sight based on the height of the vehicle from the ground
     // This needs a valid rangefinder to work, if the min/max parameters are non zero
@@ -221,7 +249,10 @@ private:
     AP_UInt16                   _options;               // Bitmask for extra options
     AP_Enum<Rotation>           _orient;                // Orientation of camera/sensor
     AP_Float                    _xy_pos_nse_base;       // xy position noise minimum
-    AP_Float                    _xy_pos_nse_grad;     // xy position noise growth (per m of altitude)
+    AP_Float                    _xy_pos_nse_grad;       // xy position noise growth (per m of altitude)
+    AP_Float                    _yaw_tol_deg;           // yaw error allowed before the timed final drop
+    AP_Float                    _safe_brg_deg;          // bearing, clockwise from north, of the beside-pad landing
+    AP_Float                    _safe_dist_m;           // distance from the last target for the beside-pad landing
 
     uint32_t                    _last_update_ms;            // system time in millisecond when update was last called
     bool                        _target_acquired;           // true if target has been seen recently after estimator is initialized
@@ -271,6 +302,23 @@ private:
     // write out PREC message to log:
     void Write_Precland();
     uint32_t _last_log_ms;  // last time we logged
+
+    // Miss-abort pad memory. Learned only while the option is enabled.
+    float                       _rf_alt_m;
+    bool                        _rf_valid;
+    float                       _pad_top_d_m;           // NED-down altitude of the highest surface seen over the pin
+    bool                        _pad_valid;
+    float                       _pad_min_rf_m;
+    bool                        _pad_min_rf_valid;
+    uint32_t                    _below_pad_since_ms;
+    bool                        _below_pad_latched;
+
+    // Latched final-drop target. Horizontal is latched first; climb rate follows.
+    Vector2p                    _frozen_pos_ne_m;
+    Vector2f                    _frozen_vel_ne_ms;
+    float                       _frozen_climb_rate_ms;
+    bool                        _final_horizontal_frozen;
+    bool                        _final_climb_frozen;
 
     static AC_PrecLand *_singleton; //singleton
 };
