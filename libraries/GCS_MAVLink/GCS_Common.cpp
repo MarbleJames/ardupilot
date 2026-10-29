@@ -4106,6 +4106,7 @@ void GCS_MAVLINK::handle_command_ack(const mavlink_message_t &msg)
 
 void GCS_MAVLINK::handle_debug_float_array(const mavlink_message_t &msg)
 {
+#if HAL_LOGGING_ENABLED
     mavlink_debug_float_array_t packet;
     mavlink_msg_debug_float_array_decode(&msg, &packet);
     struct log_DEBUG_FLOAT_ARRAY pkt{
@@ -4130,6 +4131,9 @@ void GCS_MAVLINK::handle_debug_float_array(const mavlink_message_t &msg)
     memcpy((void *)&pkt.dataE16[0], &packet.data[3 * floats_per_data64 + 1 * floats_per_data16], bytes_per_data16);
     memcpy((void *)&pkt.dataF16[0], &packet.data[3 * floats_per_data64 + 2 * floats_per_data16], sizeof(packet.data) - 3 * bytes_per_data64 - 2 * bytes_per_data16);
     AP::logger().WriteBlock(&pkt, sizeof(pkt));
+#else
+    (void)msg;
+#endif
 }
 
 #if AP_RC_CHANNEL_ENABLED
