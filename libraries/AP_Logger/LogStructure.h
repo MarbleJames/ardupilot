@@ -660,15 +660,15 @@ struct PACKED log_VER {
 };
 
 struct PACKED log_DEBUG_FLOAT_ARRAY {
-  LOG_PACKET_HEADER;
-  uint64_t time_us;
-  uint16_t array_id;
-  float dataA64[16];
-  float dataB64[16];
-  float dataC64[16];
-  float dataD16[4];
-  float dataE16[4];
-  float dataF16[4];
+    LOG_PACKET_HEADER;
+    uint64_t time_us;
+    uint16_t array_id;
+    float dataA64[16];
+    float dataB64[16];
+    float dataC64[16];
+    float dataD16[4];
+    float dataE16[4];
+    float dataF16[4];
 };
 
 
