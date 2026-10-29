@@ -18,6 +18,7 @@ ArduPilot is safety-critical autopilot software controlling real vehicles. Every
 - [8. Pull Request Guidelines](#8-pull-request-guidelines)
 - [9. Interacting with Maintainers & Developers](#9-interacting-with-maintainers--developers)
 - [10. What AI Should NOT Do](#10-what-ai-should-not-do)
+- [11. Cursor Cloud specific instructions](#11-cursor-cloud-specific-instructions)
 
 ---
 
@@ -396,3 +397,14 @@ Open a discussion before writing code if:
 - **Do not move functions around without goal**: Keep the original code structure as possible.
 - **Do not add comment on all functions/lines**: Document only what was change and useful for future reading.
 - **Do not duplicate PRs**: If a PR was already open on a feature/bugfix/changes recently, do not duplicate it.
+
+---
+
+## 11. Cursor Cloud specific instructions
+
+Cloud Agent setup runs `Tools/environment_install/install-prereqs-ubuntu.sh -y` from the repository root. There is no long-running service to start.
+
+- Python packages are in `~/venv-ardupilot`. `python3` on `PATH` execs `~/venv-ardupilot/bin/python`. The venv `python3` entry is a symlink to `/usr/bin/python3`, so a second symlink to that entry does not activate the virtualenv.
+- The GNU Arm embedded toolchain is installed at `/opt/gcc-arm-none-eabi-10-2020-q4-major`, and `arm-none-eabi-gcc` is on `PATH`.
+- Setup initializes git submodules. After changing branches, run `git submodule update --init --recursive` when a submodule directory is empty.
+- SITL: `./waf configure --board sitl` then `./waf copter`. The binary is `build/sitl/bin/arducopter` and serves MAVLink on TCP port 5760. Run `./waf` from the repository root, never with sudo.
